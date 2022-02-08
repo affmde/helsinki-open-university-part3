@@ -2,11 +2,25 @@ const express = require('express');
 const app = express();
 const morgan = require('morgan');
 const cors = require('cors')
+require('dotenv').config();
+const PersonModel = require('./models/persons');
 
+const errorHandler = (error, request, response, next) => {
+    console.error(error.message)
+  
+    if (error.name === 'CastError') {
+      return response.status(400).send({ error: 'malformatted id' })
+    }else if (error.name === 'ValidationError') {
+        return response.status(400).json({ error: error.message })
+    }
+    next(error)
+  }
+
+morgan.token('body', function (req, res) { return req.method === 'POST' ? JSON.stringify(req.body) : null})
+
+app.use(express.static('build'));
 app.use(express.json());
 app.use(cors());
-app.use(express.static('build'));
-morgan.token('body', function (req, res) { return req.method === 'POST' ? JSON.stringify(req.body) : null})
 app.use(morgan((tokens, req, res) => {
     return [
       tokens.method(req, res),
@@ -17,71 +31,65 @@ app.use(morgan((tokens, req, res) => {
       tokens['body'](req, res)
     ].join(' ')
   }))
-
-
-let persons=[
-    { 
-      "id": 1,
-      "name": "Arto Hellas", 
-      "number": "040-123456"
-    },
-    { 
-      "id": 2,
-      "name": "Ada Lovelace", 
-      "number": "39-44-5323523"
-    },
-    { 
-      "id": 3,
-      "name": "Dan Abramov", 
-      "number": "12-43-234345"
-    },
-    { 
-      "id": 4,
-      "name": "Mary Poppendieck", 
-      "number": "39-23-6423122"
-    }
-]
+  app.use(errorHandler)
 
 //Get all persons
 app.get("/api/persons", (req, res)=>{
-    res.json(persons)
+    PersonModel.find({}).then(pers=>{
+        if(pers){
+            console.log(pers)
+            res.json(pers)
+        }else{
+            res.status(404).end()
+        }
+    }).catch(error=>{
+        console.log(error);
+        res.status(400).send({error: "bad id"})
+    })
 })
 
 //Get one person
-app.get("/api/persons/:id", (req, res)=>{
-    const id= Number(req.params.id);
-    const person = persons.find(pers=>pers.id===id)
-    console.log(person)
-    res.json(person)
+app.get("/api/persons/:id", (req, res, next)=>{
+    PersonModel.findById(req.params.id).then(person=>{
+        if(person){
+            console.log(person);
+            res.json(person)
+        }else{
+            res.status(404).end()
+        }
+    }).catch(error=>{
+        next(error)
+    })
 })
 
 
 app.get("/api/info", (req, res)=>{
-    const info= `Phonebook has info for ${persons.length} people`
-    const time = new Date()
-    res.send(`<p>${info}</p><p>${time}</p>`)
+    PersonModel.find({}).then(response=>{
+        const info= `Phonebook has info for ${response.length} people`
+        const time = new Date()
+        res.send(`<p>${info}</p><p>${time}</p>`)
+    });
+    
 })
 
 //Delete a person:
 
-app.delete("/api/persons/:id", (req, res)=>{
-    const id= Number(req.params.id);
-    persons = persons.filter(person=>person.id !== id)
-
-    res.status(204).end()
-
-})
+app.delete("/api/persons/:id", (req, res, next)=>{
+        PersonModel.findByIdAndDelete(req.params.id).then(person=>{
+            console.log(person.id)
+            res.json(person)
+            res.status(204).end()
+        }).catch(error=>next(error))
+    })
 
 //Create Person:
 
-app.post("/api/persons", (req, res)=>{
+app.post("/api/persons", (req, res, next)=>{
     const person = req.body
-    const newPerson = {
-        id: Math.floor(Math.random()*999999999999),
-        timeStamp: new Date(),
+    const newPerson = new PersonModel({
         name: person.name,
         number: person.number,
-    }
+    })
 
     if(!person.name || !person.number){
         return res.status(400).json({
@@ -89,17 +97,32 @@ app.post("/api/persons", (req, res)=>{
         })
     }
     
-    if(persons.find(pers=>pers.name===newPerson.name)){
-        return res.status(400).json({
-            error: "The name already exists"
-        })
-    }
-    persons= persons.concat(newPerson)
-    res.json(newPerson)
+    
+    newPerson.save().then(pers=>{
+        res.json(pers.toJSON())
+    }).catch(error=>next(error))
+    
 })
 
+//Update person:
 
+app.put('/api/persons/:id', (req, res, next) => {
+    const body = req.body
+  
+    const person = {
+      name: body.name,
+      number: body.number,
+    }
+  
+    PersonModel.findByIdAndUpdate(req.params.id, person, { new: true })
+      .then(updatedPerson => {
+        res.json(updatedPerson)
+      })
+      .catch(error => next(error))
+  })
 
+  
+  app.use(errorHandler)
 
 
 const PORT = process.env.PORT || 3001;
